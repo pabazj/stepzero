@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Actions are pinned to commit SHAs (supply-chain safety); Dependabot bumps them.
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # --- Runtime setup: uncomment ONE block and install dependencies. ---
+      # Node:
+      # - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      #   with:
+      #     node-version-file: .nvmrc
+      #     cache: npm
+      # - run: npm ci
+      #
+      # Python:
+      # - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      #   with:
+      #     python-version: "3.12"
+      #     cache: pip
+      # - run: pip install -r requirements.txt
+      # --- End runtime setup. ---
+
+      - name: Check (lint + typecheck + tests)
+        run: ./check
+
+  # Flags (does not fail) PRs that touch paths in .stepzero/high-risk.
+  risk:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Flag high-risk paths
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: |
+          status=0
+          .stepzero/risk "$BASE" > risk.txt || status=$?
+          cat risk.txt
+          if [ "$status" -eq 3 ]; then
+            echo "::warning::This PR touches high-risk paths: a human reads every line (see AGENTS.md)."
+            { echo "## High-risk paths"; echo '```'; cat risk.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+
+  # Same naming rule as the pre-push hook, here because the hook can be skipped.
+  # Override with the repo variable STEPZERO_BRANCH_PATTERN (an ERE).
+  branch-name:
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'dependabot/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Branch is named <type>/T<n>-<slug>
+        env:
+          BRANCH: ${{ github.head_ref }}
+          PATTERN: ${{ vars.STEPZERO_BRANCH_PATTERN || '^(feat|fix|refactor|perf|test|docs|chore|ci)/T[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$' }}
+        run: |
+          if printf '%s\n' "$BRANCH" | grep -Eq -- "$PATTERN"; then
+            echo "OK: $BRANCH"
+          else
+            echo "::error::Branch '$BRANCH' should be <type>/T<n>-<slug>, e.g. feat/T3-login-form."
+            exit 1
+          fi
+
+  # Branch protection is not available for private repos on GitHub Free, so
+  # this can't prevent a direct push or an agent merge; it makes them fail
+  # loudly instead. Works for merge and squash merges.
+  # If agents use their own GitHub account or token, list those logins
+  # (space-separated) in the repo variable STEPZERO_AGENT_USERS.
+  guard-main:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless a human merged a pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          AGENT_USERS: ${{ vars.STEPZERO_AGENT_USERS }}
+        run: |
+          pr=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+            --jq '[.[] | select(.merged_at != null)][0].number // empty')
+          if [ -z "$pr" ]; then
+            echo "::error::$SHA reached main without a merged pull request (direct push)."
+            exit 1
+          fi
+          merger=$(gh api "repos/$REPO/pulls/$pr" --jq '.merged_by.login // ""')
+          for u in $AGENT_USERS; do
+            if [ "$merger" = "$u" ]; then
+              echo "::error::PR #$pr was merged by agent account '$merger'. Only humans merge."
+              exit 1
+            fi
+          done
+          echo "OK: $SHA came from PR #$pr, merged by $merger."

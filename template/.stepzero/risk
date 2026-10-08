@@ -1,0 +1,47 @@
+#!/bin/sh
+# List changed files that match the high-risk patterns in .stepzero/high-risk.
+# Covers commits since <base> plus uncommitted and untracked files.
+#
+# Usage: .stepzero/risk [base]   (default: the remote default branch, else main)
+# Exit:  0 nothing high-risk, 3 high-risk files found, 1 error
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+patterns=.stepzero/high-risk
+[ -f "$patterns" ] || { echo "risk: $patterns not found" >&2; exit 1; }
+
+base=${1:-}
+if [ -z "$base" ]; then
+  for b in "$(git symbolic-ref -q --short refs/remotes/origin/HEAD || true)" origin/main main; do
+    if [ -n "$b" ] && git rev-parse -q --verify "$b^{commit}" >/dev/null; then
+      base=$b
+      break
+    fi
+  done
+fi
+[ -n "$base" ] || { echo "risk: no base branch found. Usage: .stepzero/risk <base>" >&2; exit 1; }
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$patterns" > "$tmp" || true
+if [ ! -s "$tmp" ]; then
+  echo "risk: $patterns has no patterns"
+  exit 0
+fi
+
+hits=$(
+  {
+    git diff --name-only "$base...HEAD"
+    git diff --name-only HEAD
+    git ls-files --others --exclude-standard
+  } | sort -u | grep -E -f "$tmp" || true
+)
+
+if [ -n "$hits" ]; then
+  echo "HIGH RISK: changed files matching $patterns (vs $base):"
+  printf '%s\n' "$hits" | sed 's/^/  /'
+  exit 3
+fi
+echo "risk: no high-risk paths touched (vs $base)"

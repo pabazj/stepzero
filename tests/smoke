@@ -1,0 +1,150 @@
+#!/bin/sh
+# Smoke tests for install, init, pre-push, and .stepzero/risk.
+# Uses throwaway temp dirs only; never touches ~/.cursor or real repos.
+# Usage: tests/smoke   (SH=dash tests/smoke runs the scripts under dash)
+set -u
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+SH=${SH:-sh}
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+T=$(cd "$T" && pwd -P)
+
+# Isolate from the user's git config and hooks.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+export GIT_AUTHOR_NAME=smoke GIT_AUTHOR_EMAIL=smoke@example.com
+export GIT_COMMITTER_NAME=smoke GIT_COMMITTER_EMAIL=smoke@example.com
+
+pass=0
+fail=0
+ok() { pass=$((pass + 1)); echo "  ok    $1"; }
+bad() { fail=$((fail + 1)); echo "  FAIL  $1"; }
+
+# expect <exit-code> <description> <command...>
+expect() {
+  want=$1 desc=$2
+  shift 2
+  "$@" >"$T/out" 2>&1
+  got=$?
+  if [ "$got" -eq "$want" ]; then
+    ok "$desc"
+  else
+    bad "$desc (exit $got, expected $want)"
+    sed 's/^/        /' "$T/out"
+  fi
+}
+
+# said <text>: the last expect's output contains <text>
+said() {
+  if grep -qF -- "$1" "$T/out"; then ok "  ...says \"$1\""; else bad "  ...should say \"$1\""; fi
+}
+
+not_said() { ! grep -qF -- "$1" "$T/out"; }
+
+# assert <description> <command...>
+assert() {
+  desc=$1
+  shift
+  if "$@" >/dev/null 2>&1; then ok "$desc"; else bad "$desc"; fi
+}
+
+install() { env STEPZERO_SKILLS_DIR="$1" "$SH" "$ROOT/scripts/install"; }
+init() { "$SH" "$ROOT/scripts/init" "$1"; }
+
+echo "install"
+S="$T/skills"
+expect 0 "fresh install links skills" install "$S"
+assert "stepzero-plan links into the repo" [ "$(readlink "$S/stepzero-plan")" = "$ROOT/skills/stepzero-plan" ]
+expect 0 "re-run is a no-op" install "$S"
+mkdir -p "$T/skills2/stepzero-plan"
+expect 1 "an existing real dir is reported as a conflict" install "$T/skills2"
+assert "the conflicting dir is left untouched" [ ! -L "$T/skills2/stepzero-plan" ]
+
+echo "init"
+A="$T/app"
+mkdir "$A"
+expect 1 "refuses a non-git dir" init "$A"
+git init -q -b main "$A"
+mkdir "$A/sub"
+expect 1 "refuses a subfolder of a repo" init "$A/sub"
+expect 1 "refuses the stepzero repo itself" init "$ROOT"
+echo "# mine" >"$A/AGENTS.md"
+expect 0 "copies the template" init "$A"
+assert "an existing AGENTS.md is preserved" [ "$(cat "$A/AGENTS.md")" = "# mine" ]
+assert "check is executable" [ -x "$A/check" ]
+assert ".stepzero/risk is executable" [ -x "$A/.stepzero/risk" ]
+assert ".stepzero/version is written" [ -s "$A/.stepzero/version" ]
+assert "the pre-push hook is installed" [ -x "$A/.git/hooks/pre-push" ]
+expect 0 "re-run succeeds" init "$A"
+assert "re-run creates nothing" not_said "  create  "
+HOOK="$A/.git/hooks/pre-push"
+printf '#!/bin/sh\n# stepzero:pre-push\nexit 0\n' >"$HOOK"
+expect 0 "re-run with an older stepzero hook" init "$A"
+assert "an older stepzero hook is updated" cmp -s "$ROOT/scripts/pre-push" "$HOOK"
+printf '#!/bin/sh\necho custom\n' >"$HOOK"
+expect 0 "re-run with a foreign hook" init "$A"
+assert "a foreign hook is left untouched" grep -q custom "$HOOK"
+cp "$ROOT/scripts/pre-push" "$HOOK"
+
+echo "pre-push"
+git init -q --bare "$T/remote.git"
+cd "$A" || exit 1
+git remote add origin "$T/remote.git"
+git add -A
+git commit -qm init
+git push -q --no-verify origin main 2>/dev/null
+git commit -q --allow-empty -m direct
+expect 1 "blocks a push to main" git push origin main
+said "direct pushes to 'main' are blocked"
+git reset -q --hard HEAD~1
+F=feat/T1-real-check
+git checkout -qb "$F"
+expect 1 "blocks when ./check fails (unedited stub)" git push origin "$F"
+said "./check failed"
+printf '#!/bin/sh\necho checks ok\n' >check
+git commit -qam "real check"
+expect 0 "allows a task branch push when ./check passes" git push origin "$F"
+said "./check passed"
+git checkout -qb my-stuff
+expect 1 "blocks a branch not named <type>/T<n>-<slug>" git push origin my-stuff
+said "doesn't follow the naming rule"
+git config stepzero.branchPattern '^wip/'
+git checkout -qb wip/spike
+expect 0 "honours stepzero.branchPattern" git push origin wip/spike
+git config --unset stepzero.branchPattern
+git checkout -q "$F"
+git commit -q --allow-empty -m more
+echo x >scratch.txt
+expect 1 "blocks when the working tree is dirty" git push origin "$F"
+said "uncommitted or untracked changes"
+rm scratch.txt
+O=fix/T2-other
+git checkout -qb "$O"
+git commit -q --allow-empty -m other
+git checkout -q "$F"
+expect 1 "blocks pushing a commit that isn't checked out" git push origin "$O"
+said "not checked out"
+git config stepzero.protectedBranches release
+git checkout -qb release
+expect 1 "honours stepzero.protectedBranches" git push origin release
+said "direct pushes to 'release' are blocked"
+git config --unset stepzero.protectedBranches
+git checkout -q "$F"
+printf '#!/bin/sh\nexit 1\n' >check
+expect 0 "branch deletion skips the check" git push origin --delete "$F"
+git checkout -q -- check
+
+echo "risk"
+expect 3 "flags an edit to ./check (a gate)" "$SH" .stepzero/risk main
+git checkout -q main
+expect 0 "nothing changed" "$SH" .stepzero/risk main
+echo hi >notes.md
+expect 0 "an ordinary untracked file is fine" "$SH" .stepzero/risk main
+mkdir -p src/auth
+echo x >src/auth/login.ts
+expect 3 "flags an untracked file under auth/" "$SH" .stepzero/risk main
+assert "lists the flagged file" grep -q "src/auth/login.ts" "$T/out"
+
+echo
+echo "$pass passed, $fail failed"
+[ "$fail" -eq 0 ]

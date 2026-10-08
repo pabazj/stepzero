@@ -1,0 +1,33 @@
+# High-risk path patterns: extended regexes (grep -E), one per line, matched
+# against repo-relative paths. A changed file matching any line makes the change
+# high risk. Over-matching is intended: it's safer to flag and dismiss.
+# Edit for this project. Blank lines and lines starting with # are ignored.
+# Some risks are not path-based (e.g. a DELETE query in ordinary code); those
+# still rely on the plan and the reviewer.
+
+# The workflow's own gates. Changing these can silently weaken every check.
+^check$
+^\.github/
+^\.stepzero/
+^AGENTS\.md$
+^\.cursorignore$
+
+# Auth, sessions, permissions
+(^|/)(auth|login|session|permission|rbac|acl)
+
+# Payments and billing
+(^|/)(payment|billing|checkout|stripe|invoice)
+
+# Schema and migrations
+(^|/)(migrations?|schema)(/|\.|$)
+\.sql$
+
+# Env, config, secrets
+(^|/)\.env
+(^|/)(config|settings|secrets?)(/|\.)
+
+# Dependencies
+(^|/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|uv\.lock|Pipfile(\.lock)?|go\.(mod|sum)|Cargo\.(toml|lock)|Gemfile(\.lock)?)$
+
+# Deploy and infrastructure
+(^|/)(Dockerfile|docker-compose[^/]*\.ya?ml|terraform|k8s|helm|deploy)

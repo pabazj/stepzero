@@ -1,0 +1,78 @@
+#!/bin/sh
+# Opt a project into stepzero: copy template/ into it (never overwriting
+# existing files) and install the pre-push hook. Safe to re-run.
+#
+# Usage: scripts/init <path-to-project>
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
+HOOK_MARKER="# stepzero:pre-push"
+
+die() { echo "init: $*" >&2; exit 1; }
+
+[ $# -eq 1 ] || die "usage: scripts/init <path-to-project>"
+[ -d "$1" ] || die "not a directory: $1"
+TARGET=$(cd "$1" && pwd -P)
+[ "$TARGET" != "$ROOT" ] || die "refusing to init the stepzero repo itself"
+top=$(git -C "$TARGET" rev-parse --show-toplevel 2>/dev/null) \
+  || die "$TARGET is not a git repo. Run 'git init' there first."
+top=$(cd "$top" && pwd -P)
+[ "$top" = "$TARGET" ] \
+  || die "$TARGET is inside the repo at $top. Pass the repo root instead."
+
+echo "Copying template into $TARGET"
+cd "$ROOT/template"
+find . -type f | sort | while IFS= read -r f; do
+  rel=${f#./}
+  dst="$TARGET/$rel"
+  if [ -e "$dst" ] || [ -L "$dst" ]; then
+    echo "  skip    $rel (already exists)"
+  else
+    mkdir -p "$(dirname "$dst")"
+    cp -p "$f" "$dst"
+    echo "  create  $rel"
+  fi
+done
+
+version="$TARGET/.stepzero/version"
+if [ -e "$version" ]; then
+  echo "  skip    .stepzero/version (already exists)"
+else
+  sha=$(git -C "$ROOT" describe --always --dirty --abbrev=12 2>/dev/null || echo unknown)
+  printf 'stepzero %s\ninitialized %s\n' "$sha" "$(date +%Y-%m-%d)" > "$version"
+  echo "  create  .stepzero/version (stepzero $sha)"
+fi
+
+echo "Installing pre-push hook"
+hooks=$(cd "$TARGET" && git rev-parse --git-path hooks)
+case $hooks in /*) ;; *) hooks="$TARGET/$hooks" ;; esac
+mkdir -p "$hooks"
+hook="$hooks/pre-push"
+
+if [ ! -e "$hook" ]; then
+  cp "$ROOT/scripts/pre-push" "$hook"
+  chmod +x "$hook"
+  echo "  create  $hook"
+elif cmp -s "$ROOT/scripts/pre-push" "$hook"; then
+  echo "  ok      pre-push hook is up to date"
+elif grep -q "^$HOOK_MARKER" "$hook"; then
+  cp "$ROOT/scripts/pre-push" "$hook"
+  chmod +x "$hook"
+  echo "  update  $hook (older stepzero hook replaced)"
+else
+  echo "  SKIP    $hook exists and is not a stepzero hook. Left untouched." >&2
+  echo "          Merge $ROOT/scripts/pre-push into it by hand." >&2
+fi
+
+cat <<EOF
+
+Next steps in $TARGET:
+  1. Edit ./check to run your lint, typecheck, and tests (it fails until you do).
+  2. Fill in the TODOs in AGENTS.md and docs/PLAN.md.
+  3. Uncomment the runtime setup in .github/workflows/ci.yml.
+  4. Enable your package ecosystem in .github/dependabot.yml.
+  5. Add project-specific paths to .stepzero/high-risk.
+  6. Public repo (or paid plan): on GitHub, protect main and require a PR and
+     the "check" status. Private repo on GitHub Free: branch protection isn't
+     available; the pre-push hook and CI's guard-main job are your safety net.
+EOF

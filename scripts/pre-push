@@ -1,0 +1,90 @@
+#!/bin/sh
+# stepzero:pre-push
+# Blocks direct pushes to protected branches and badly named branches, then
+# runs ./check (the same command CI runs) on exactly the commit being pushed.
+# Installed by stepzero scripts/init. Bypass in an emergency: git push --no-verify
+#
+# Protected branches: `git config stepzero.protectedBranches "main release"`
+# overrides the default (main, master, and the remote's default branch).
+# Branch names: `git config stepzero.branchPattern '<ERE>'` overrides the
+# default <type>/T<n>-<slug>, e.g. feat/T3-login-form.
+set -u
+
+remote=${1:-origin}
+
+protected=$(git config --get stepzero.protectedBranches || true)
+if [ -z "$protected" ]; then
+  default=$(git symbolic-ref -q --short "refs/remotes/$remote/HEAD" 2>/dev/null || true)
+  protected="main master ${default#"$remote"/}"
+fi
+
+pattern=$(git config --get stepzero.branchPattern || true)
+[ -n "$pattern" ] || pattern='^(feat|fix|refactor|perf|test|docs|chore|ci)/T[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$'
+
+head=$(git rev-parse -q --verify HEAD || true)
+blocked=""
+badly_named=""
+needs_check=0
+other_commit=0
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  for b in $protected; do
+    [ "$remote_ref" = "refs/heads/$b" ] && blocked=$b
+  done
+  case $local_sha in
+    *[!0]*)
+      needs_check=1
+      [ "$local_sha" = "$head" ] || other_commit=1
+      case $remote_ref in
+        refs/heads/*)
+          name=${remote_ref#refs/heads/}
+          printf '%s\n' "$name" | grep -Eq -- "$pattern" || badly_named=$name
+          ;;
+      esac
+      ;;
+  esac
+done
+
+if [ -n "$blocked" ]; then
+  echo "pre-push: direct pushes to '$blocked' are blocked." >&2
+  echo "  Push a branch and open a pull request instead." >&2
+  exit 1
+fi
+
+if [ -n "$badly_named" ]; then
+  echo "pre-push: branch '$badly_named' doesn't follow the naming rule." >&2
+  echo "  Use <type>/T<n>-<slug> for the task in docs/PLAN.md, e.g. feat/T3-login-form" >&2
+  echo "  (types: feat fix refactor perf test docs chore ci). Rename with:" >&2
+  echo "  git branch -m <new-name>" >&2
+  exit 1
+fi
+
+# Branch deletions only: nothing to check.
+[ "$needs_check" -eq 1 ] || exit 0
+
+root=$(git rev-parse --show-toplevel) || exit 1
+cd "$root" || exit 1
+
+# ./check runs on the working tree, so it must equal the pushed commit.
+if [ "$other_commit" -eq 1 ]; then
+  echo "pre-push: you are pushing a commit that is not checked out (HEAD)." >&2
+  echo "  Check out the branch you are pushing, then push again." >&2
+  exit 1
+fi
+if [ -n "$(git status --porcelain)" ]; then
+  echo "pre-push: uncommitted or untracked changes would make ./check unreliable." >&2
+  echo "  Commit or stash them (git stash -u), then push again." >&2
+  exit 1
+fi
+
+if [ ! -x ./check ]; then
+  echo "pre-push: ./check not found or not executable in $root." >&2
+  echo "  Create it (see stepzero template) or run: chmod +x check" >&2
+  exit 1
+fi
+
+echo "pre-push: running ./check"
+if ! ./check </dev/null; then
+  echo "pre-push: ./check failed. Push blocked. Fix it and push again." >&2
+  exit 1
+fi
+echo "pre-push: ./check passed"

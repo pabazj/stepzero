@@ -57,8 +57,11 @@ docs/archive/       finished features, old handoff notes
 - Name: `<type>/T<n>-<slug>` from the task (types: `feat fix refactor perf
   test docs chore ci`). The hook rejects other names.
 - Start from up-to-date main: `git switch main && git pull && git switch -c <branch>`
-- **Humans merge.** Stop when the PR is open and CI is green. Never
-  `gh pr merge`, merge/approve via API or UI, or `git merge` into `main`.
+- **Agent opens the PR** when the task is ready (`./check` passed, preflight
+  READY). Don't wait for the human to say "open a PR" or `/stepzero-preflight`.
+  Paste the PR URL, then stop.
+- **Humans merge.** Never `gh pr merge`, merge/approve via API or UI, or
+  `git merge` into `main`.
 
 ## Change, build, STOP
 
@@ -81,8 +84,10 @@ A new request during an active task — if unsure, stop and ask:
   Add it under Backlog in `PLAN.md`; don't implement.
 - Loop `./check` until it passes. Don't weaken tests or checks to get there.
 - Don't read, print, or commit secrets.
-- Before `/stepzero-preflight`: re-read IN, OUT, Done when. Diff matches IN;
-  each Done when item has test (or why-not) evidence.
+- When `./check` passes: re-read IN, OUT, Done when. Diff matches IN; each
+  Done when item has test (or why-not) evidence. Then **open the PR** (body
+  from `/stepzero-report` PR mode, status `in review`, push, `gh pr create`).
+  Don't wait for a slash command. If not ready, stop — no PR.
 - **Pipeline:** after this PR is **open**, the next **approved** task may
   start from up-to-date `main` if **Depends on** is none (or already merged).
   Don't wait for merge unless it needs this branch's code. Don't add that
@@ -114,15 +119,15 @@ Statuses: `draft` → `approved` → `doing` → `in review` → (`changes reque
 
 1. **Plan** `/stepzero-plan`. Each task: Branch, IN/OUT, Done when, Risk, Depends on.
    No code. Human approves (`Approved: YYYY-MM-DD`).
-2. **Build** on the task branch (rules above), one chat until the PR is open.
-3. **Preflight** `/stepzero-preflight`. Then `/stepzero-report` as the PR body; status
-   `in review`. Open the PR. Stop. Next independent task: **new chat**, from `main`.
-4. **Review** — skip for **low** (copy, styling, logs, tests): human skims
+2. **Build** on the task branch (rules above) until `./check` passes, then
+   **open the PR**. One chat until it is open. Stop. Next independent task:
+   **new chat**, from `main`.
+3. **Review** — skip for **low** (copy, styling, logs, tests): human skims
    and merges. **Medium**: `/stepzero-review` in a fresh chat + human tries it.
    **High**: same, plus High-risk above, then explicit "I approve merge."
    CHANGES REQUESTED → fix → `./check` → `/stepzero-review` again. Don't merge yet.
-5. **Merge** human only. Medium/high: CI green, review APPROVE, human tried it.
-6. **Close** `/stepzero-report` after merge: status `done`, handoff, proposed rules
+4. **Merge** human only. Medium/high: CI green, review APPROVE, human tried it.
+5. **Close** `/stepzero-report` after merge: status `done`, handoff, proposed rules
    (human approves each before they land in this file).
 
 Start each session from this file, the latest handoff in `PLAN.md`, and

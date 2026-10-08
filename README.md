@@ -5,11 +5,12 @@ on **macOS**. Not an app, crew, or cloud service. Clone it, install skills
 once, opt each **git** project in with `scripts/init`. Product code does not
 live here.
 
-The agent may plan, code, check, and **open a PR**. You approve the plan and
-**merge to `main`**. `./check` (lint + typecheck + tests) is "done" locally,
-in the hook, and in CI. Memory is files (`AGENTS.md`, `docs/PLAN.md`,
-`docs/DECISIONS.md`), not chat. Free tools: Cursor, GitHub Free, git hooks.
-Other agents that read `AGENTS.md` / `SKILL.md` can use it too.
+The agent plans, codes, checks, and **opens the PR**. You approve the plan
+and **merge to `main`**. You do not open the PR. `./check` (lint + typecheck
++ tests) is "done" locally, in the hook, and in CI. Memory is files
+(`AGENTS.md`, `docs/PLAN.md`, `docs/DECISIONS.md`), not chat. Free tools:
+Cursor, GitHub Free, git hooks. Other agents that read `AGENTS.md` /
+`SKILL.md` can use it too.
 
 **For:** small teams, opted-in repos, apps you can test. **Not for:** spikes,
 monorepos, or a fleet of agents. One task, one chat, one folder.
@@ -37,13 +38,14 @@ Prompts guide. Hook and CI enforce what they can. You are the merge lock.
 
 ## Skills
 
-Type the slash command (they do not auto-run). Cursor `/plan` and `/review`
-are **not** these.
+Type the slash command for plan / review / close. Opening the PR is part of
+**build** — it happens after `./check` even if you never type
+`/stepzero-preflight`. Cursor `/plan` and `/review` are **not** these.
 
 | Command | When | Does |
 |---------|------|------|
 | `/stepzero-plan` | New work or mid-task change | Tasks with Branch, IN/OUT, Done when, Risk, Depends on. **No code** until you approve. |
-| `/stepzero-preflight` | Task looks done | `./check`, IN/OUT, high-risk. If READY, may write the PR body. Never merges. |
+| `/stepzero-preflight` | Task looks done / `./check` passed | `./check`, IN/OUT, high-risk. If READY, **opens the PR**. Never merges. |
 | `/stepzero-review` | Medium/high, **new chat** | Review the diff. No edits. Skip for low risk. CHANGES REQUESTED → fix → `./check` → run again. |
 | `/stepzero-report` | PR, or after merge | Unmerged: PR body, status `in review`. Merged: handoff, `done`, **proposed** AGENTS.md rules (you approve). |
 
@@ -53,10 +55,13 @@ Other agent: `STEPZERO_SKILLS_DIR=~/.other-agent/skills scripts/install`.
 
 ```
 /stepzero-plan → you approve → build until ./check passes
-  → /stepzero-preflight → open PR → stop
+  → agent opens the PR → stop
   → /stepzero-review (new chat; skip if low) → you try medium/high → you merge
   → /stepzero-report
 ```
+
+After `./check` passes the agent **must** open the PR (preflight + `gh pr
+create`). Don't wait for `/stepzero-preflight` or "open a PR."
 
 Mid-task: **continue** / **re-plan** / **new task** / **cancel**. Don't pile
 onto the branch.

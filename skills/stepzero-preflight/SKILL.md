@@ -1,6 +1,6 @@
 ---
 name: stepzero-preflight
-description: Verifies a finished task before opening a PR. Runs ./check, confirms Done when and IN/OUT, gathers proof for medium/high risk, and flags high-risk or gate-file scope creep. Use when the user runs /stepzero-preflight, says a task is done, or before creating a pull request.
+description: Verifies a finished task and opens the PR. Runs ./check, confirms Done when and IN/OUT, gathers proof for medium/high risk, flags high-risk or gate-file scope creep, then push and gh pr create. Use when the user runs /stepzero-preflight, says a task is done, ./check has passed, or the build is finished. Opening the PR is required when READY. Never merge.
 disable-model-invocation: true
 ---
 
@@ -65,6 +65,8 @@ Decide whether the current task is ready for a PR. Evidence over claims.
 
 If READY **and** `./check` passed in this turn: write the PR body here
 (same template as `/stepzero-report` PR mode), set status `in review`, then
-push and open the PR. Don't start a second gather pass over the whole tree.
-If NOT READY, stop — no PR body. Never merge. Medium/high: leave the Human
+**push and open the PR** (`gh pr create`). Paste the PR URL. This is
+required — don't wait for the human to say "open a PR" or to type this
+slash. Don't start a second gather pass over the whole tree.
+If NOT READY, stop — no PR. Never merge. Medium/high: leave the Human
 try boxes for the human.

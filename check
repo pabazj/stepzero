@@ -1,0 +1,20 @@
+#!/bin/sh
+# stepzero's own check: shellcheck + smoke tests. Same command locally and in CI.
+# Run the scripts under a stricter shell with: SH=dash ./check
+set -eu
+cd "$(dirname "$0")"
+
+if ! command -v shellcheck >/dev/null 2>&1; then
+  echo "check: shellcheck is required." >&2
+  echo "  macOS: brew install shellcheck   Debian/Ubuntu: sudo apt-get install shellcheck" >&2
+  exit 1
+fi
+
+echo "== shellcheck"
+shellcheck -s sh check tests/smoke \
+  scripts/install scripts/init scripts/pre-push \
+  template/check template/.stepzero/risk
+echo "ok"
+
+echo "== smoke tests"
+sh tests/smoke

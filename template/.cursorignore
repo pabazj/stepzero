@@ -1,0 +1,24 @@
+# Keep secrets out of AI context. Add project-specific paths below.
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Secret stores and credentials
+secrets/
+.secrets/
+*.secret
+credentials.json
+service-account*.json
+.npmrc
+.pypirc
+.netrc

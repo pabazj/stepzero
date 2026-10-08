@@ -1,0 +1,14 @@
+#!/bin/sh
+# The single definition of "done": lint + typecheck + tests.
+# Runs locally, in the pre-push hook, and in CI. Keep all three identical by
+# only ever calling this script.
+set -eu
+
+# Replace the four lines below with your commands, one per line, e.g.:
+#   npm run lint
+#   npm run typecheck
+#   npm test
+echo "check: not configured yet. Edit ./check to run lint, typecheck, and tests." >&2
+echo "  Example (Node):   npm run lint && npm run typecheck && npm test" >&2
+echo "  Example (Python): ruff check . && mypy . && pytest" >&2
+exit 1
